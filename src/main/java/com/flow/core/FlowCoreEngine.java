@@ -1,6 +1,7 @@
 package com.flow.core;
 
-import com.flow.core.export.Neo4jExporter;
+import com.flow.core.export.ExporterFactory;
+import com.flow.core.export.GraphExporter;
 import com.flow.core.flow.FlowExtractor;
 import com.flow.core.graph.CoreGraph;
 import com.flow.core.graph.GraphValidator;
@@ -27,7 +28,6 @@ public class FlowCoreEngine {
     private final ZoomEngine zoomEngine;
     private final FlowExtractor flowExtractor;
     private final MergeEngine mergeEngine;
-    private final Neo4jExporter neo4jExporter;
 
     public FlowCoreEngine() {
         this.staticGraphLoader = new StaticGraphLoader();
@@ -36,7 +36,6 @@ public class FlowCoreEngine {
         this.zoomEngine = new ZoomEngine();
         this.flowExtractor = new FlowExtractor();
         this.mergeEngine = new MergeEngine();
-        this.neo4jExporter = new Neo4jExporter();
     }
 
     /**
@@ -76,7 +75,16 @@ public class FlowCoreEngine {
     }
 
     public String exportToNeo4j(CoreGraph graph) {
-        return neo4jExporter.export(graph);
+        GraphExporter exporter = ExporterFactory.getExporter(ExporterFactory.Format.NEO4J);
+        return exporter.export(graph);
+    }
+
+    /**
+     * Export graph using specified format.
+     */
+    public String export(CoreGraph graph, ExporterFactory.Format format) {
+        GraphExporter exporter = ExporterFactory.getExporter(format);
+        return exporter.export(graph);
     }
 }
 

@@ -240,9 +240,10 @@ public class MergeEngine {
             RuntimeEvent enterEvent = enterEvents.get(exitEvent.getSpanId());
             if (enterEvent != null) {
                 long duration = exitEvent.getTimestamp() - enterEvent.getTimestamp();
-                // TODO: Store duration in node metadata when CoreNode supports it
-                // CoreNode node = graph.getNode(exitEvent.getNodeId());
-                // if (node != null) node.setData("durationMs", duration);
+                CoreNode node = graph.getNode(exitEvent.getNodeId());
+                if (node != null) {
+                    node.setMetadata("durationMs", duration);
+                }
             }
         }
     }
@@ -263,8 +264,13 @@ public class MergeEngine {
         private void applyCheckpoint(RuntimeEvent event, CoreGraph graph) {
             CoreNode node = graph.getNode(event.getNodeId());
             if (node != null) {
-                // TODO: Store checkpoint data when CoreNode supports metadata
-                // node.setData("checkpoints", event.getData());
+                @SuppressWarnings("unchecked")
+                Map<String, Object> checkpoints = (Map<String, Object>) node.getMetadata("checkpoints");
+                if (checkpoints == null) {
+                    checkpoints = new HashMap<>();
+                    node.setMetadata("checkpoints", checkpoints);
+                }
+                checkpoints.putAll(event.getData());
             }
         }
     }
@@ -352,9 +358,8 @@ public class MergeEngine {
         private void attachError(RuntimeEvent event, CoreGraph graph) {
             CoreNode node = graph.getNode(event.getNodeId());
             if (node != null) {
-                // TODO: Store error data when CoreNode supports metadata
-                // node.setData("error", event.getData());
-                // node.setData("status", "FAILED");
+                node.setMetadata("error", event.getData());
+                node.setMetadata("status", "FAILED");
             }
         }
     }

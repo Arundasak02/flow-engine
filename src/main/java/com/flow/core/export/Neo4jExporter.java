@@ -14,8 +14,9 @@ import java.util.stream.Collectors;
  * CREATE (n<id>:Node {id, name, type, zoomLevel, isPublic});
  * CREATE (n<source>)-[:TYPE {executionCount}]->(n<target>);
  */
-public class Neo4jExporter {
+public class Neo4jExporter implements GraphExporter {
 
+    @Override
     public String export(CoreGraph graph) {
         Objects.requireNonNull(graph, "Graph cannot be null");
 

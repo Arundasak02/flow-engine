@@ -1,6 +1,6 @@
 package com.flow.core.graph;
 
-import java.util.Objects;
+import java.util.*;
 
 public class CoreNode {
 
@@ -10,6 +10,7 @@ public class CoreNode {
     private int zoomLevel;
     private final String serviceId;
     private final Visibility visibility;
+    private final Map<String, Object> metadata;
 
     public CoreNode(String id, String name, NodeType type, String serviceId, Visibility visibility) {
         this.id = Objects.requireNonNull(id, "Node ID cannot be null");
@@ -18,6 +19,7 @@ public class CoreNode {
         this.serviceId = serviceId;
         this.visibility = Objects.requireNonNull(visibility, "Visibility cannot be null");
         this.zoomLevel = -1;
+        this.metadata = new HashMap<>();
     }
 
     public String getId() {
@@ -57,6 +59,35 @@ public class CoreNode {
 
     public boolean isPublic() {
         return visibility.isPublic();
+    }
+
+    /**
+     * Get metadata value by key.
+     * Used for storing runtime data like durations, checkpoints, errors.
+     */
+    public Object getMetadata(String key) {
+        return metadata.get(key);
+    }
+
+    /**
+     * Set metadata value.
+     */
+    public void setMetadata(String key, Object value) {
+        metadata.put(key, value);
+    }
+
+    /**
+     * Get all metadata as unmodifiable map.
+     */
+    public Map<String, Object> getAllMetadata() {
+        return Collections.unmodifiableMap(metadata);
+    }
+
+    /**
+     * Check if metadata key exists.
+     */
+    public boolean hasMetadata(String key) {
+        return metadata.containsKey(key);
     }
 
     @Override
