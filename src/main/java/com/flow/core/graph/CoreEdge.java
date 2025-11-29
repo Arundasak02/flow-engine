@@ -2,20 +2,15 @@ package com.flow.core.graph;
 
 import java.util.Objects;
 
-/**
- * Represents a directed edge between two nodes in the flow graph.
- *
- * An edge represents a call, dependency, or data flow relationship.
- */
 public class CoreEdge {
 
     private final String id;
-    private final String sourceId; // references CoreNode.id
-    private final String targetId; // references CoreNode.id
-    private final String type; // e.g., "CALLS", "DEPENDS_ON", "FLOWS_TO"
-    private long executionCount; // runtime execution count (0 for static only)
+    private final String sourceId;
+    private final String targetId;
+    private final EdgeType type;
+    private long executionCount;
 
-    public CoreEdge(String id, String sourceId, String targetId, String type) {
+    public CoreEdge(String id, String sourceId, String targetId, EdgeType type) {
         this.id = Objects.requireNonNull(id, "Edge ID cannot be null");
         this.sourceId = Objects.requireNonNull(sourceId, "Source ID cannot be null");
         this.targetId = Objects.requireNonNull(targetId, "Target ID cannot be null");
@@ -35,7 +30,7 @@ public class CoreEdge {
         return targetId;
     }
 
-    public String getType() {
+    public EdgeType getType() {
         return type;
     }
 
@@ -70,7 +65,7 @@ public class CoreEdge {
                 "id='" + id + '\'' +
                 ", sourceId='" + sourceId + '\'' +
                 ", targetId='" + targetId + '\'' +
-                ", type='" + type + '\'' +
+                ", type=" + type +
                 ", executionCount=" + executionCount +
                 '}';
     }

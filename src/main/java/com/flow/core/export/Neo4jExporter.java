@@ -8,36 +8,20 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * Exports a CoreGraph to Neo4j Cypher format.
+ * Exports graph to Neo4j Cypher CREATE statements.
  *
- * Generates CREATE and MERGE statements for Neo4j import.
- * Exports:
- * - Nodes with properties (name, type, zoomLevel, isPublic)
- * - Edges/relationships with execution counts
- *
- * Example output:
- * CREATE (n1:Node {id: "ep1", name: "GET /api/users", type: "ENDPOINT", zoomLevel: 1})
- * CREATE (n2:Node {id: "svc1", name: "UserService", type: "SERVICE", zoomLevel: 2})
- * CREATE (n1)-[:CALLS {executionCount: 42}]->(n2)
+ * Output format:
+ * CREATE (n<id>:Node {id, name, type, zoomLevel, isPublic});
+ * CREATE (n<source>)-[:TYPE {executionCount}]->(n<target>);
  */
 public class Neo4jExporter {
 
-    /**
-     * Export the graph to Neo4j Cypher format.
-     *
-     * @param graph the CoreGraph to export
-     * @return Cypher query string ready for Neo4j import
-     */
     public String export(CoreGraph graph) {
         Objects.requireNonNull(graph, "Graph cannot be null");
 
         StringBuilder sb = new StringBuilder();
-
-        // Export nodes
         exportNodes(graph, sb);
         sb.append("\n");
-
-        // Export edges
         exportEdges(graph, sb);
 
         return sb.toString();
@@ -45,39 +29,45 @@ public class Neo4jExporter {
 
     private void exportNodes(CoreGraph graph, StringBuilder sb) {
         for (CoreNode node : graph.getAllNodes()) {
-            String cypher = String.format(
-                    "CREATE (n%s:Node {id: \"%s\", name: \"%s\", type: \"%s\", zoomLevel: %d, isPublic: %s});%n",
-                    escapeId(node.getId()),
-                    escapeString(node.getId()),
-                    escapeString(node.getName()),
-                    node.getType(),
-                    node.getZoomLevel(),
-                    node.isPublic()
-            );
+            String cypher = buildNodeCypher(node);
             sb.append(cypher);
         }
+    }
+
+    private String buildNodeCypher(CoreNode node) {
+        return String.format(
+                "CREATE (n%s:Node {id: \"%s\", name: \"%s\", type: \"%s\", zoomLevel: %d, isPublic: %s});%n",
+                escapeId(node.getId()),
+                escapeString(node.getId()),
+                escapeString(node.getName()),
+                node.getType().name(),
+                node.getZoomLevel(),
+                node.isPublic()
+        );
     }
 
     private void exportEdges(CoreGraph graph, StringBuilder sb) {
         for (CoreEdge edge : graph.getAllEdges()) {
-            String cypher = String.format(
-                    "CREATE (n%s)-[:%s {executionCount: %d}]->(n%s);%n",
-                    escapeId(edge.getSourceId()),
-                    edge.getType(),
-                    edge.getExecutionCount(),
-                    escapeId(edge.getTargetId())
-            );
+            String cypher = buildEdgeCypher(edge);
             sb.append(cypher);
         }
     }
 
+    private String buildEdgeCypher(CoreEdge edge) {
+        return String.format(
+                "CREATE (n%s)-[:%s {executionCount: %d}]->(n%s);%n",
+                escapeId(edge.getSourceId()),
+                edge.getType().name(),
+                edge.getExecutionCount(),
+                escapeId(edge.getTargetId())
+        );
+    }
+
     private String escapeId(String id) {
-        // Simple escaping for node identifiers
         return id.replaceAll("[^a-zA-Z0-9_]", "_");
     }
 
     private String escapeString(String str) {
-        // Escape quotes in strings
         return str.replace("\"", "\\\"");
     }
 }

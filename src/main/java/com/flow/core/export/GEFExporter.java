@@ -7,75 +7,77 @@ import com.flow.core.graph.CoreNode;
 import java.util.*;
 
 /**
- * Exports a CoreGraph to GEF (Graph Exchange Format) JSON.
+ * Exports graph to GEF (Graph Exchange Format) JSON for visualization tools.
  *
- * GEF is a JSON-based format suitable for graph visualization tools.
- * Exports graph structure with nodes, edges, and layout information.
- *
- * Example structure:
+ * Output structure:
  * {
  *   "version": "1",
- *   "nodes": [
- *     { "id": "ep1", "label": "GET /api/users", "type": "ENDPOINT", "zoomLevel": 1, "x": 100, "y": 100 }
- *   ],
- *   "edges": [
- *     { "id": "e1", "source": "ep1", "target": "svc1", "label": "CALLS", "weight": 42 }
- *   ]
+ *   "nodes": [{id, label, type, zoomLevel, isPublic}],
+ *   "edges": [{id, source, target, label, weight}]
  * }
  */
 public class GEFExporter {
 
-    /**
-     * Export the graph to GEF JSON format.
-     *
-     * @param graph the CoreGraph to export
-     * @return JSON string in GEF format
-     */
     public String export(CoreGraph graph) {
         Objects.requireNonNull(graph, "Graph cannot be null");
 
         StringBuilder json = new StringBuilder();
         json.append("{\n");
         json.append("  \"version\": \"").append(graph.getVersion()).append("\",\n");
-        json.append("  \"nodes\": [\n");
 
-        // Export nodes
-        List<CoreNode> nodes = new ArrayList<>(graph.getAllNodes());
-        for (int i = 0; i < nodes.size(); i++) {
-            CoreNode node = nodes.get(i);
-            json.append("    ").append(nodeToJson(node));
-            if (i < nodes.size() - 1) {
-                json.append(",");
-            }
-            json.append("\n");
-        }
+        appendNodes(graph, json);
+        appendEdges(graph, json);
 
-        json.append("  ],\n");
-        json.append("  \"edges\": [\n");
-
-        // Export edges
-        List<CoreEdge> edges = new ArrayList<>(graph.getAllEdges());
-        for (int i = 0; i < edges.size(); i++) {
-            CoreEdge edge = edges.get(i);
-            json.append("    ").append(edgeToJson(edge));
-            if (i < edges.size() - 1) {
-                json.append(",");
-            }
-            json.append("\n");
-        }
-
-        json.append("  ]\n");
         json.append("}\n");
 
         return json.toString();
     }
+
+    private void appendNodes(CoreGraph graph, StringBuilder json) {
+        json.append("  \"nodes\": [\n");
+
+        List<CoreNode> nodes = new ArrayList<>(graph.getAllNodes());
+        for (int i = 0; i < nodes.size(); i++) {
+            appendNode(json, nodes.get(i), i < nodes.size() - 1);
+        }
+
+        json.append("  ],\n");
+    }
+
+    private void appendNode(StringBuilder json, CoreNode node, boolean addComma) {
+        json.append("    ").append(nodeToJson(node));
+        if (addComma) {
+            json.append(",");
+        }
+        json.append("\n");
+    }
+
+    private void appendEdges(CoreGraph graph, StringBuilder json) {
+        json.append("  \"edges\": [\n");
+
+        List<CoreEdge> edges = new ArrayList<>(graph.getAllEdges());
+        for (int i = 0; i < edges.size(); i++) {
+            appendEdge(json, edges.get(i), i < edges.size() - 1);
+        }
+
+        json.append("  ]\n");
+    }
+
+    private void appendEdge(StringBuilder json, CoreEdge edge, boolean addComma) {
+        json.append("    ").append(edgeToJson(edge));
+        if (addComma) {
+            json.append(",");
+        }
+        json.append("\n");
+    }
+
 
     private String nodeToJson(CoreNode node) {
         return String.format(
                 "{\"id\": \"%s\", \"label\": \"%s\", \"type\": \"%s\", \"zoomLevel\": %d, \"isPublic\": %s}",
                 escapeJson(node.getId()),
                 escapeJson(node.getName()),
-                node.getType(),
+                node.getType().name(),
                 node.getZoomLevel(),
                 node.isPublic()
         );
@@ -87,7 +89,7 @@ public class GEFExporter {
                 escapeJson(edge.getId()),
                 escapeJson(edge.getSourceId()),
                 escapeJson(edge.getTargetId()),
-                edge.getType(),
+                edge.getType().name(),
                 edge.getExecutionCount()
         );
     }

@@ -1,95 +1,93 @@
 package com.flow.core.ingest;
 
-import com.flow.core.graph.CoreEdge;
-import com.flow.core.graph.CoreGraph;
-import com.flow.core.graph.CoreNode;
+import com.flow.core.graph.*;
 
 import java.util.*;
 
 /**
- * Ingests runtime events into the CoreGraph.
+ * Ingests runtime execution events into the graph.
  *
- * Runtime events are execution traces captured at runtime that record:
- * - Which methods/endpoints were actually called
- * - How many times (execution count)
- * - Call sequences and timing (optional)
- *
- * Expected event format (example):
+ * Expected event format:
  * {
- *   "timestamp": 1234567890,
- *   "sourceId": "meth1",
- *   "targetId": "meth2",
- *   "executionCount": 42,
- *   "duration": 150
+ *   "sourceId": "nodeId",
+ *   "targetId": "nodeId",
+ *   "executionCount": 42
  * }
+ *
+ * Creates missing runtime nodes automatically. Updates edge execution counts.
  */
 public class RuntimeEventIngestor {
 
-    /**
-     * Ingest runtime events into the graph.
-     *
-     * @param events list of runtime event maps
-     * @param graph the CoreGraph to update
-     */
     public void ingest(List<Map<String, Object>> events, CoreGraph graph) {
         Objects.requireNonNull(events, "Events list cannot be null");
         Objects.requireNonNull(graph, "Graph cannot be null");
 
-        for (Map<String, Object> event : events) {
-            ingestEvent(event, graph);
-        }
+        events.forEach(event -> ingestEvent(event, graph));
     }
 
+    // Processes single event: validates, ensures nodes exist, updates edge count
     private void ingestEvent(Map<String, Object> event, CoreGraph graph) {
         String sourceId = (String) event.get("sourceId");
         String targetId = (String) event.get("targetId");
 
-        if (sourceId == null || targetId == null) {
-            // Skip malformed events
+        if (!isValidEvent(sourceId, targetId)) {
             return;
         }
 
-        CoreNode source = graph.getNode(sourceId);
-        CoreNode target = graph.getNode(targetId);
+        ensureNodesExist(graph, sourceId, targetId);
+        updateEdge(graph, sourceId, targetId, event);
+    }
 
-        if (source == null || target == null) {
-            // Create runtime nodes if they don't exist
-            if (source == null) {
-                source = createRuntimeNode(sourceId);
-                graph.addNode(source);
-            }
-            if (target == null) {
-                target = createRuntimeNode(targetId);
-                graph.addNode(target);
-            }
+    private boolean isValidEvent(String sourceId, String targetId) {
+        return sourceId != null && targetId != null;
+    }
+
+    private void ensureNodesExist(CoreGraph graph, String sourceId, String targetId) {
+        ensureNodeExists(graph, sourceId);
+        ensureNodeExists(graph, targetId);
+    }
+
+    private void ensureNodeExists(CoreGraph graph, String nodeId) {
+        if (graph.getNode(nodeId) == null) {
+            CoreNode node = createRuntimeNode(nodeId);
+            graph.addNode(node);
         }
+    }
 
-        // Update or create edge with execution count
+    private CoreNode createRuntimeNode(String nodeId) {
+        return new CoreNode(
+                nodeId,
+                "Runtime: " + nodeId,
+                NodeType.METHOD,
+                null,
+                Visibility.PUBLIC
+        );
+    }
+
+    private void updateEdge(CoreGraph graph, String sourceId, String targetId, Map<String, Object> event) {
         String edgeId = sourceId + "->" + targetId;
+        CoreEdge edge = getOrCreateEdge(graph, edgeId, sourceId, targetId);
+        updateExecutionCount(edge, event);
+    }
+
+    private CoreEdge getOrCreateEdge(CoreGraph graph, String edgeId, String sourceId, String targetId) {
         CoreEdge edge = graph.getEdge(edgeId);
 
         if (edge == null) {
-            edge = new CoreEdge(edgeId, sourceId, targetId, "RUNTIME_CALL");
+            edge = new CoreEdge(edgeId, sourceId, targetId, EdgeType.RUNTIME_CALL);
             graph.addEdge(edge);
         }
 
-        // Update execution count
+        return edge;
+    }
+
+    private void updateExecutionCount(CoreEdge edge, Map<String, Object> event) {
         Long executionCount = getNumericValue(event.get("executionCount"));
         if (executionCount != null) {
             edge.setExecutionCount(executionCount);
         }
     }
 
-    private CoreNode createRuntimeNode(String nodeId) {
-        // Create a minimal runtime node
-        return new CoreNode(
-                nodeId,
-                "Runtime: " + nodeId,
-                "RUNTIME_CALL",
-                null,
-                false
-        );
-    }
 
     private Long getNumericValue(Object value) {
         if (value instanceof Number) {

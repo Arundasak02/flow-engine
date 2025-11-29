@@ -7,62 +7,52 @@ import com.flow.core.graph.CoreNode;
 import java.util.*;
 
 /**
- * Extracts flows from the graph.
- *
- * A flow is a traversal path from a starting node (e.g., endpoint)
- * through the graph, representing the full call chain or data flow.
- *
- * Uses BFS (Breadth-First Search) by default to discover all nodes
- * reachable from each endpoint.
- *
- * Extracts one flow per business-level node (e.g., per endpoint).
+ * Extracts flows from graph using BFS traversal.
+ * Creates one FlowModel per business-level node (zoom level 1).
  */
 public class FlowExtractor {
 
-    private static final int MAX_DEPTH = 100; // Prevent infinite loops
+    private static final int MAX_DEPTH = 100;
 
     /**
-     * Extract flows from the graph.
-     *
-     * Creates a FlowModel for each business-level node (zoom level 1).
-     *
-     * @param graph the CoreGraph
-     * @return list of extracted FlowModel objects
+     * Extracts flows from all business-level nodes (endpoints, topics).
      */
     public List<FlowModel> extractFlows(CoreGraph graph) {
         Objects.requireNonNull(graph, "Graph cannot be null");
 
         List<FlowModel> flows = new ArrayList<>();
-
-        // Find all business-level nodes (endpoints, topics)
         List<CoreNode> businessNodes = graph.getNodesByZoomLevel(1);
 
         for (CoreNode businessNode : businessNodes) {
-            FlowModel flow = extractFlow(graph, businessNode);
-            flows.add(flow);
+            flows.add(extractFlow(graph, businessNode));
         }
 
         return flows;
     }
 
     /**
-     * Extract a single flow starting from a given node.
-     *
-     * @param graph the CoreGraph
-     * @param startNode the starting node for the flow
-     * @return the extracted FlowModel
+     * Extracts a single flow via BFS from the given start node.
      */
     public FlowModel extractFlow(CoreGraph graph, CoreNode startNode) {
         Objects.requireNonNull(graph, "Graph cannot be null");
         Objects.requireNonNull(startNode, "Start node cannot be null");
 
-        FlowModel flowModel = new FlowModel(
+        FlowModel flowModel = createFlowModel(startNode);
+        addStartStep(flowModel, startNode);
+        traverseGraph(graph, flowModel, startNode);
+
+        return flowModel;
+    }
+
+    private FlowModel createFlowModel(CoreNode startNode) {
+        return new FlowModel(
                 "flow_" + startNode.getId(),
                 startNode.getId(),
                 startNode.getName()
         );
+    }
 
-        // Add start node as first step
+    private void addStartStep(FlowModel flowModel, CoreNode startNode) {
         FlowStep startStep = new FlowStep(
                 startNode.getId(),
                 startNode.getName(),
@@ -71,8 +61,10 @@ public class FlowExtractor {
                 new ArrayList<>()
         );
         flowModel.addStep(startStep);
+    }
 
-        // BFS traversal
+    // BFS traversal: discovers all reachable nodes from start, respects MAX_DEPTH
+    private void traverseGraph(CoreGraph graph, FlowModel flowModel, CoreNode startNode) {
         Set<String> visited = new HashSet<>();
         Queue<TraversalNode> queue = new LinkedList<>();
         queue.offer(new TraversalNode(startNode.getId(), 1, new ArrayList<>()));
@@ -80,61 +72,73 @@ public class FlowExtractor {
         while (!queue.isEmpty()) {
             TraversalNode current = queue.poll();
 
-            if (visited.contains(current.nodeId)) {
+            if (shouldSkipNode(visited, current)) {
                 continue;
             }
+
             visited.add(current.nodeId);
-
-            if (current.depth > MAX_DEPTH) {
-                break; // Prevent infinite traversal
-            }
-
-            CoreNode node = graph.getNode(current.nodeId);
-            if (node == null) {
-                continue;
-            }
-
-            // Get outgoing edges
-            List<CoreEdge> outgoingEdges = graph.getOutgoingEdges(current.nodeId);
-
-            for (CoreEdge edge : outgoingEdges) {
-                String targetId = edge.getTargetId();
-
-                if (!visited.contains(targetId)) {
-                    CoreNode targetNode = graph.getNode(targetId);
-                    if (targetNode != null) {
-                        // Add step to flow
-                        List<String> previousSteps = new ArrayList<>(current.path);
-                        previousSteps.add(current.nodeId);
-
-                        FlowStep step = new FlowStep(
-                                targetNode.getId(),
-                                targetNode.getName(),
-                                targetNode.getZoomLevel(),
-                                current.depth,
-                                previousSteps
-                        );
-                        flowModel.addStep(step);
-
-                        // Queue for further exploration
-                        List<String> newPath = new ArrayList<>(current.path);
-                        newPath.add(current.nodeId);
-                        queue.offer(new TraversalNode(targetId, current.depth + 1, newPath));
-                    }
-                }
-            }
+            processNode(graph, flowModel, current, queue, visited);
         }
-
-        return flowModel;
     }
 
-    /**
-     * Internal class for BFS traversal state.
-     */
+    private boolean shouldSkipNode(Set<String> visited, TraversalNode node) {
+        return visited.contains(node.nodeId) || node.depth > MAX_DEPTH;
+    }
+
+    private void processNode(CoreGraph graph, FlowModel flowModel, TraversalNode current,
+                             Queue<TraversalNode> queue, Set<String> visited) {
+        CoreNode node = graph.getNode(current.nodeId);
+        if (node == null) {
+            return;
+        }
+
+        List<CoreEdge> outgoingEdges = graph.getOutgoingEdges(current.nodeId);
+        for (CoreEdge edge : outgoingEdges) {
+            processEdge(graph, flowModel, current, edge, queue, visited);
+        }
+    }
+
+    private void processEdge(CoreGraph graph, FlowModel flowModel, TraversalNode current,
+                            CoreEdge edge, Queue<TraversalNode> queue, Set<String> visited) {
+        String targetId = edge.getTargetId();
+
+        if (visited.contains(targetId)) {
+            return;
+        }
+
+        CoreNode targetNode = graph.getNode(targetId);
+        if (targetNode == null) {
+            return;
+        }
+
+        addFlowStep(flowModel, targetNode, current);
+        enqueueNextNode(queue, targetId, current);
+    }
+
+    private void addFlowStep(FlowModel flowModel, CoreNode targetNode, TraversalNode current) {
+        List<String> previousSteps = new ArrayList<>(current.path);
+        previousSteps.add(current.nodeId);
+
+        FlowStep step = new FlowStep(
+                targetNode.getId(),
+                targetNode.getName(),
+                targetNode.getZoomLevel(),
+                current.depth,
+                previousSteps
+        );
+        flowModel.addStep(step);
+    }
+
+    private void enqueueNextNode(Queue<TraversalNode> queue, String targetId, TraversalNode current) {
+        List<String> newPath = new ArrayList<>(current.path);
+        newPath.add(current.nodeId);
+        queue.offer(new TraversalNode(targetId, current.depth + 1, newPath));
+    }
+
     private static class TraversalNode {
         final String nodeId;
         final int depth;
-        final List<String> path; // path from start to this node
+        final List<String> path;
 
         TraversalNode(String nodeId, int depth, List<String> path) {
             this.nodeId = nodeId;

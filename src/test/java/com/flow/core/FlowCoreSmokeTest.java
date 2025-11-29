@@ -1,21 +1,9 @@
 package com.flow.core;
 
-import com.flow.core.graph.CoreEdge;
-import com.flow.core.graph.CoreGraph;
-import com.flow.core.graph.CoreNode;
+import com.flow.core.graph.*;
 
 import java.util.*;
 
-/**
- * Basic smoke test for Flow Core Engine.
- *
- * Validates that the core pipeline works end-to-end:
- * 1. Load static graph
- * 2. Validate structure
- * 3. Assign zoom levels
- * 4. Extract flows
- * 5. Export
- */
 public class FlowCoreSmokeTest {
 
     public static void main(String[] args) {
@@ -51,18 +39,16 @@ public class FlowCoreSmokeTest {
     private static CoreGraph createTestGraph() {
         CoreGraph graph = new CoreGraph("1");
 
-        // Create test nodes
-        CoreNode ep1 = new CoreNode("ep1", "GET /api/users", "ENDPOINT", null, true);
-        CoreNode svc1 = new CoreNode("svc1", "UserService", "SERVICE", "svc1", true);
-        CoreNode meth1 = new CoreNode("meth1", "getUser", "METHOD", "svc1", true);
+        CoreNode ep1 = new CoreNode("ep1", "GET /api/users", NodeType.ENDPOINT, null, Visibility.PUBLIC);
+        CoreNode svc1 = new CoreNode("svc1", "UserService", NodeType.SERVICE, "svc1", Visibility.PUBLIC);
+        CoreNode meth1 = new CoreNode("meth1", "getUser", NodeType.METHOD, "svc1", Visibility.PUBLIC);
 
         graph.addNode(ep1);
         graph.addNode(svc1);
         graph.addNode(meth1);
 
-        // Create edges
-        CoreEdge e1 = new CoreEdge("e1", "ep1", "svc1", "CALLS");
-        CoreEdge e2 = new CoreEdge("e2", "svc1", "meth1", "CALLS");
+        CoreEdge e1 = new CoreEdge("e1", "ep1", "svc1", EdgeType.CALL);
+        CoreEdge e2 = new CoreEdge("e2", "svc1", "meth1", EdgeType.CALL);
 
         graph.addEdge(e1);
         graph.addEdge(e2);

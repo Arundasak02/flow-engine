@@ -1,87 +1,105 @@
 package com.flow.core.ingest;
 
-import com.flow.core.graph.CoreEdge;
-import com.flow.core.graph.CoreGraph;
-import com.flow.core.graph.CoreNode;
+import com.flow.core.graph.*;
 
 import java.util.*;
 
 /**
  * Merges static graph with runtime execution data.
  *
- * The merge process:
- * 1. Aligns static nodes with runtime execution nodes
- * 2. Updates execution counts on edges
- * 3. Marks nodes as "hot" (frequently executed)
- * 4. Enriches edges with timing and call frequency data
- * 5. Resolves node identity across static and runtime layers
+ * Merge process:
+ * 1. Identify and link runtime nodes to static nodes
+ * 2. Aggregate execution counts across duplicate edges
+ * 3. Mark "hot" nodes/paths (execution count > threshold)
  */
 public class MergeEngine {
 
-    private static final long HOT_THRESHOLD = 100; // calls to mark a node as "hot"
+    private static final long HOT_THRESHOLD = 100;
 
     /**
-     * Merge runtime execution data with the static graph.
-     *
-     * @param graph the CoreGraph with both static and runtime data
+     * Performs three-stage merge: identify runtime nodes, aggregate stats, mark hot paths.
      */
     public void merge(CoreGraph graph) {
         Objects.requireNonNull(graph, "Graph cannot be null");
 
-        // Identify runtime nodes and match them with static nodes
         identifyRuntimeNodes(graph);
-
-        // Aggregate execution statistics
         aggregateExecutionStats(graph);
-
-        // Mark hot paths
         markHotPaths(graph);
     }
 
+    // Stage 1: Match runtime nodes with static nodes by ID
     private void identifyRuntimeNodes(CoreGraph graph) {
-        // Separate static and runtime nodes
+        Set<CoreNode> runtimeNodes = collectRuntimeNodes(graph);
+
+        for (CoreNode runtimeNode : runtimeNodes) {
+            linkToStaticNode(graph, runtimeNode);
+        }
+    }
+
+    private Set<CoreNode> collectRuntimeNodes(CoreGraph graph) {
         Set<CoreNode> runtimeNodes = new HashSet<>();
 
         for (CoreNode node : graph.getAllNodes()) {
-            if ("RUNTIME_CALL".equals(node.getType())) {
+            if (isRuntimeNode(node)) {
                 runtimeNodes.add(node);
             }
         }
 
-        // For each runtime node, try to find a matching static node
-        for (CoreNode runtimeNode : runtimeNodes) {
-            // Simple matching: if a static node with similar ID exists, link them
-            CoreNode staticNode = graph.getNode(runtimeNode.getId());
-            if (staticNode != null && !"RUNTIME_CALL".equals(staticNode.getType())) {
-                // Runtime execution confirmed for this static node
-                // Could mark it as "verified" or "observed"
-            }
+        return runtimeNodes;
+    }
+
+    private boolean isRuntimeNode(CoreNode node) {
+        return node.getType() == NodeType.METHOD && node.getName().startsWith("Runtime:");
+    }
+
+    // Future: mark static node as "verified" if matching runtime node found
+    private void linkToStaticNode(CoreGraph graph, CoreNode runtimeNode) {
+        CoreNode staticNode = graph.getNode(runtimeNode.getId());
+        if (staticNode != null && !isRuntimeNode(staticNode)) {
+            // Runtime execution confirmed for this static node
         }
     }
 
+    // Stage 2: Aggregate execution counts for edges with same source→target
     private void aggregateExecutionStats(CoreGraph graph) {
-        // For each edge, aggregate execution counts across all instances
+        Map<String, Long> edgeExecutionCounts = calculateEdgeCounts(graph);
+        updateEdgesWithCounts(graph, edgeExecutionCounts);
+    }
+
+    private Map<String, Long> calculateEdgeCounts(CoreGraph graph) {
         Map<String, Long> edgeExecutionCounts = new HashMap<>();
 
         for (CoreEdge edge : graph.getAllEdges()) {
-            String edgeKey = edge.getSourceId() + "->" + edge.getTargetId();
+            String edgeKey = createEdgeKey(edge);
             long totalCount = edgeExecutionCounts.getOrDefault(edgeKey, 0L);
             totalCount += edge.getExecutionCount();
             edgeExecutionCounts.put(edgeKey, totalCount);
         }
 
-        // Update edges with aggregated counts
+        return edgeExecutionCounts;
+    }
+
+    private String createEdgeKey(CoreEdge edge) {
+        return edge.getSourceId() + "->" + edge.getTargetId();
+    }
+
+    private void updateEdgesWithCounts(CoreGraph graph, Map<String, Long> edgeExecutionCounts) {
         for (CoreEdge edge : graph.getAllEdges()) {
-            String edgeKey = edge.getSourceId() + "->" + edge.getTargetId();
+            String edgeKey = createEdgeKey(edge);
             edge.setExecutionCount(edgeExecutionCounts.getOrDefault(edgeKey, 0L));
         }
     }
 
+    // Stage 3: Identify frequently executed nodes (incoming edge count > threshold)
     private void markHotPaths(CoreGraph graph) {
-        // Identify nodes and edges that are heavily executed
+        Map<String, Long> nodeExecutionCounts = calculateNodeCounts(graph);
+        markHotNodes(graph, nodeExecutionCounts);
+    }
+
+    // Sums execution counts of all incoming edges per node
+    private Map<String, Long> calculateNodeCounts(CoreGraph graph) {
         Map<String, Long> nodeExecutionCounts = new HashMap<>();
 
-        // Aggregate execution counts for each node (incoming edges)
         for (CoreEdge edge : graph.getAllEdges()) {
             String targetId = edge.getTargetId();
             long count = nodeExecutionCounts.getOrDefault(targetId, 0L);
@@ -89,15 +107,23 @@ public class MergeEngine {
             nodeExecutionCounts.put(targetId, count);
         }
 
-        // Mark nodes exceeding threshold
+        return nodeExecutionCounts;
+    }
+
+    // Future: mark nodes exceeding threshold with "isHot" metadata
+    private void markHotNodes(CoreGraph graph, Map<String, Long> nodeExecutionCounts) {
         for (Map.Entry<String, Long> entry : nodeExecutionCounts.entrySet()) {
-            if (entry.getValue() > HOT_THRESHOLD) {
+            if (isHotNode(entry.getValue())) {
                 CoreNode node = graph.getNode(entry.getKey());
                 if (node != null) {
                     // Could extend CoreNode with "isHot" flag or metadata
                 }
             }
         }
+    }
+
+    private boolean isHotNode(long executionCount) {
+        return executionCount > HOT_THRESHOLD;
     }
 
     public void setHotThreshold(long threshold) {

@@ -2,32 +2,22 @@ package com.flow.core.graph;
 
 import java.util.Objects;
 
-/**
- * Represents a node in the flow graph.
- *
- * A CoreNode can be at any zoom level:
- * - Level 1: Business (endpoints, topics)
- * - Level 2: Service/Class
- * - Level 3: Public methods
- * - Level 4: Private/internal methods
- * - Level 5: Runtime execution nodes
- */
 public class CoreNode {
 
     private final String id;
     private final String name;
-    private final String type; // e.g., "ENDPOINT", "SERVICE", "METHOD", "RUNTIME_CALL"
-    private int zoomLevel; // 1-5
-    private final String serviceId; // reference to parent service/class
-    private final boolean isPublic;
+    private final NodeType type;
+    private int zoomLevel;
+    private final String serviceId;
+    private final Visibility visibility;
 
-    public CoreNode(String id, String name, String type, String serviceId, boolean isPublic) {
+    public CoreNode(String id, String name, NodeType type, String serviceId, Visibility visibility) {
         this.id = Objects.requireNonNull(id, "Node ID cannot be null");
         this.name = Objects.requireNonNull(name, "Node name cannot be null");
         this.type = Objects.requireNonNull(type, "Node type cannot be null");
         this.serviceId = serviceId;
-        this.isPublic = isPublic;
-        this.zoomLevel = -1; // unassigned until zoom engine processes it
+        this.visibility = Objects.requireNonNull(visibility, "Visibility cannot be null");
+        this.zoomLevel = -1;
     }
 
     public String getId() {
@@ -38,7 +28,7 @@ public class CoreNode {
         return name;
     }
 
-    public String getType() {
+    public NodeType getType() {
         return type;
     }
 
@@ -47,18 +37,26 @@ public class CoreNode {
     }
 
     public void setZoomLevel(int zoomLevel) {
+        validateZoomLevel(zoomLevel);
+        this.zoomLevel = zoomLevel;
+    }
+
+    private void validateZoomLevel(int zoomLevel) {
         if (zoomLevel < 1 || zoomLevel > 5) {
             throw new IllegalArgumentException("Zoom level must be between 1 and 5");
         }
-        this.zoomLevel = zoomLevel;
     }
 
     public String getServiceId() {
         return serviceId;
     }
 
+    public Visibility getVisibility() {
+        return visibility;
+    }
+
     public boolean isPublic() {
-        return isPublic;
+        return visibility.isPublic();
     }
 
     @Override
@@ -79,10 +77,10 @@ public class CoreNode {
         return "CoreNode{" +
                 "id='" + id + '\'' +
                 ", name='" + name + '\'' +
-                ", type='" + type + '\'' +
+                ", type=" + type +
                 ", zoomLevel=" + zoomLevel +
                 ", serviceId='" + serviceId + '\'' +
-                ", isPublic=" + isPublic +
+                ", visibility=" + visibility +
                 '}';
     }
 }

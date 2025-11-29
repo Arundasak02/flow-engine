@@ -14,18 +14,11 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * FlowCoreEngine is the main orchestration class for the Flow Core library.
+ * Main orchestration engine for the Flow Core pipeline.
  *
- * It coordinates the full pipeline:
- * 1. Load static graph (flow.json)
- * 2. Assign zoom levels
- * 3. Validate graph structure
- * 4. Extract flows per endpoint
- * 5. Load runtime events (optional)
- * 6. Merge static + runtime data
- * 7. Export to Neo4j or GEF format
- *
- * Pure Java, no Spring, no HTTP, no frameworks.
+ * Pipeline stages:
+ * 1. Load static graph (JSON) → 2. Assign zoom levels → 3. Validate structure →
+ * 4. Extract flows → 5. Merge runtime events (optional) → 6. Export
  */
 public class FlowCoreEngine {
 
@@ -50,61 +43,45 @@ public class FlowCoreEngine {
     }
 
     /**
-     * Main entry point: process static graph JSON and optional runtime events.
-     *
-     * @param staticGraphJson the flow.json content as a string
-     * @param runtimeEvents optional list of runtime event data
-     * @return an enriched CoreGraph ready for export
-     * @throws IllegalArgumentException if graph validation fails
+     * Processes static graph JSON with optional runtime events.
+     * Returns enriched graph ready for export.
      */
     public CoreGraph process(String staticGraphJson, List<Map<String, Object>> runtimeEvents) {
-        // 1. Load static graph
-        CoreGraph graph = staticGraphLoader.load(staticGraphJson);
+        CoreGraph graph = loadAndValidateStaticGraph(staticGraphJson);
 
-        // 2. Assign zoom levels
-        zoomEngine.assignZoomLevels(graph);
-
-        // 3. Validate structure (after zoom assignment)
-        graphValidator.validate(graph);
-
-        // 4. Extract flows per endpoint
-        flowExtractor.extractFlows(graph);
-
-        // 5. Merge runtime events if provided
-        if (runtimeEvents != null && !runtimeEvents.isEmpty()) {
-            runtimeEventIngestor.ingest(runtimeEvents, graph);
-            mergeEngine.merge(graph);
+        if (shouldMergeRuntimeEvents(runtimeEvents)) {
+            mergeRuntimeData(graph, runtimeEvents);
         }
 
         return graph;
     }
 
-    /**
-     * Process static graph only (no runtime events).
-     *
-     * @param staticGraphJson the flow.json content as a string
-     * @return an enriched CoreGraph ready for export
-     */
+    // Pipeline stages: load → zoom → validate → extract flows
+    private CoreGraph loadAndValidateStaticGraph(String staticGraphJson) {
+        CoreGraph graph = staticGraphLoader.load(staticGraphJson);
+        zoomEngine.assignZoomLevels(graph);
+        graphValidator.validate(graph);
+        flowExtractor.extractFlows(graph);
+        return graph;
+    }
+
+    private boolean  shouldMergeRuntimeEvents(List<Map<String, Object>> runtimeEvents) {
+        return runtimeEvents != null && !runtimeEvents.isEmpty();
+    }
+
+    private void mergeRuntimeData(CoreGraph graph, List<Map<String, Object>> runtimeEvents) {
+        runtimeEventIngestor.ingest(runtimeEvents, graph);
+        mergeEngine.merge(graph);
+    }
+
     public CoreGraph process(String staticGraphJson) {
         return process(staticGraphJson, null);
     }
 
-    /**
-     * Export the enriched graph to Neo4j Cypher format.
-     *
-     * @param graph the enriched CoreGraph
-     * @return Cypher query string
-     */
     public String exportToNeo4j(CoreGraph graph) {
         return neo4jExporter.export(graph);
     }
 
-    /**
-     * Export the enriched graph to GEF format.
-     *
-     * @param graph the enriched CoreGraph
-     * @return GEF JSON string
-     */
     public String exportToGEF(CoreGraph graph) {
         return gefExporter.export(graph);
     }
