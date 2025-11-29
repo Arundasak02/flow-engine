@@ -1,6 +1,5 @@
 package com.flow.core;
 
-import com.flow.core.export.GEFExporter;
 import com.flow.core.export.Neo4jExporter;
 import com.flow.core.flow.FlowExtractor;
 import com.flow.core.graph.CoreGraph;
@@ -29,7 +28,6 @@ public class FlowCoreEngine {
     private final FlowExtractor flowExtractor;
     private final MergeEngine mergeEngine;
     private final Neo4jExporter neo4jExporter;
-    private final GEFExporter gefExporter;
 
     public FlowCoreEngine() {
         this.staticGraphLoader = new StaticGraphLoader();
@@ -39,7 +37,6 @@ public class FlowCoreEngine {
         this.flowExtractor = new FlowExtractor();
         this.mergeEngine = new MergeEngine();
         this.neo4jExporter = new Neo4jExporter();
-        this.gefExporter = new GEFExporter();
     }
 
     /**
@@ -80,10 +77,6 @@ public class FlowCoreEngine {
 
     public String exportToNeo4j(CoreGraph graph) {
         return neo4jExporter.export(graph);
-    }
-
-    public String exportToGEF(CoreGraph graph) {
-        return gefExporter.export(graph);
     }
 }
 

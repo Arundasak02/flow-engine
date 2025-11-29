@@ -1,95 +1,100 @@
 package com.flow.core.ingest;
 
 import com.flow.core.graph.*;
+import com.flow.core.runtime.EventType;
+import com.flow.core.runtime.RuntimeEvent;
+import com.flow.core.runtime.RuntimeTraceBuffer;
 
 import java.util.*;
 
 /**
- * Ingests runtime execution events into the graph.
+ * Ingests runtime execution events into the RuntimeTraceBuffer.
  *
- * Expected event format:
- * {
- *   "sourceId": "nodeId",
- *   "targetId": "nodeId",
- *   "executionCount": 42
- * }
- *
- * Creates missing runtime nodes automatically. Updates edge execution counts.
+ * Accepts RuntimeEvent objects and buffers them by traceId.
+ * Does NOT modify the graph directly - that's MergeEngine's job.
  */
 public class RuntimeEventIngestor {
 
-    public void ingest(List<Map<String, Object>> events, CoreGraph graph) {
+    private final RuntimeTraceBuffer buffer;
+
+    public RuntimeEventIngestor() {
+        this.buffer = new RuntimeTraceBuffer();
+    }
+
+    public RuntimeEventIngestor(RuntimeTraceBuffer buffer) {
+        this.buffer = Objects.requireNonNull(buffer, "RuntimeTraceBuffer cannot be null");
+    }
+
+    public void ingest(RuntimeEvent event) {
+        Objects.requireNonNull(event, "RuntimeEvent cannot be null");
+        buffer.addEvent(event);
+    }
+
+    public void ingest(List<RuntimeEvent> events) {
         Objects.requireNonNull(events, "Events list cannot be null");
-        Objects.requireNonNull(graph, "Graph cannot be null");
-
-        events.forEach(event -> ingestEvent(event, graph));
+        buffer.addEvents(events);
     }
 
-    // Processes single event: validates, ensures nodes exist, updates edge count
-    private void ingestEvent(Map<String, Object> event, CoreGraph graph) {
-        String sourceId = (String) event.get("sourceId");
-        String targetId = (String) event.get("targetId");
+    public List<RuntimeEvent> getEventsByTrace(String traceId) {
+        return buffer.getEventsByTrace(traceId);
+    }
 
-        if (!isValidEvent(sourceId, targetId)) {
-            return;
+    public Set<String> getAllTraceIds() {
+        return buffer.getAllTraceIds();
+    }
+
+    public void clearTrace(String traceId) {
+        buffer.clearTrace(traceId);
+    }
+
+    public void expireOldTraces() {
+        buffer.expireOldTraces();
+    }
+
+    public RuntimeTraceBuffer getBuffer() {
+        return buffer;
+    }
+
+    // Legacy method for backward compatibility with Map<String, Object> format
+    @Deprecated
+    public void ingest(List<Map<String, Object>> eventMaps, CoreGraph graph) {
+        Objects.requireNonNull(eventMaps, "Events list cannot be null");
+
+        List<RuntimeEvent> events = new ArrayList<>();
+        for (Map<String, Object> eventMap : eventMaps) {
+            RuntimeEvent event = convertMapToEvent(eventMap);
+            if (event != null) {
+                events.add(event);
+            }
         }
 
-        ensureNodesExist(graph, sourceId, targetId);
-        updateEdge(graph, sourceId, targetId, event);
+        ingest(events);
     }
 
-    private boolean isValidEvent(String sourceId, String targetId) {
-        return sourceId != null && targetId != null;
-    }
+    @SuppressWarnings("unchecked")
+    private RuntimeEvent convertMapToEvent(Map<String, Object> eventMap) {
+        try {
+            String traceId = (String) eventMap.get("traceId");
+            Long timestamp = getLongValue(eventMap.get("timestamp"));
+            String typeStr = (String) eventMap.get("type");
+            String nodeId = (String) eventMap.get("nodeId");
+            String spanId = (String) eventMap.get("spanId");
+            String parentSpanId = (String) eventMap.get("parentSpanId");
+            Map<String, Object> data = (Map<String, Object>) eventMap.get("data");
 
-    private void ensureNodesExist(CoreGraph graph, String sourceId, String targetId) {
-        ensureNodeExists(graph, sourceId);
-        ensureNodeExists(graph, targetId);
-    }
+            if (traceId == null || timestamp == null || typeStr == null || nodeId == null) {
+                return null;
+            }
 
-    private void ensureNodeExists(CoreGraph graph, String nodeId) {
-        if (graph.getNode(nodeId) == null) {
-            CoreNode node = createRuntimeNode(nodeId);
-            graph.addNode(node);
-        }
-    }
+            EventType type = EventType.valueOf(typeStr.toUpperCase());
 
-    private CoreNode createRuntimeNode(String nodeId) {
-        return new CoreNode(
-                nodeId,
-                "Runtime: " + nodeId,
-                NodeType.METHOD,
-                null,
-                Visibility.PUBLIC
-        );
-    }
-
-    private void updateEdge(CoreGraph graph, String sourceId, String targetId, Map<String, Object> event) {
-        String edgeId = sourceId + "->" + targetId;
-        CoreEdge edge = getOrCreateEdge(graph, edgeId, sourceId, targetId);
-        updateExecutionCount(edge, event);
-    }
-
-    private CoreEdge getOrCreateEdge(CoreGraph graph, String edgeId, String sourceId, String targetId) {
-        CoreEdge edge = graph.getEdge(edgeId);
-
-        if (edge == null) {
-            edge = new CoreEdge(edgeId, sourceId, targetId, EdgeType.RUNTIME_CALL);
-            graph.addEdge(edge);
-        }
-
-        return edge;
-    }
-
-    private void updateExecutionCount(CoreEdge edge, Map<String, Object> event) {
-        Long executionCount = getNumericValue(event.get("executionCount"));
-        if (executionCount != null) {
-            edge.setExecutionCount(executionCount);
+            return new RuntimeEvent(traceId, timestamp, type, nodeId, spanId, parentSpanId, data);
+        } catch (Exception e) {
+            return null;
         }
     }
 
-
-    private Long getNumericValue(Object value) {
+    private Long getLongValue(Object value) {
         if (value instanceof Number) {
             return ((Number) value).longValue();
         }

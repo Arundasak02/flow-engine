@@ -255,15 +255,6 @@ public class StaticGraphLoaderTest {
             throw new AssertionError("Neo4j export should contain CREATE statements");
         }
         System.out.println("  ✓ Neo4j export: " + neo4j.split("\n").length + " statements");
-
-        String gef = engine.exportToGEF(graph);
-        if (gef == null || gef.isEmpty()) {
-            throw new AssertionError("GEF export failed");
-        }
-        if (!gef.contains("\"nodes\"") || !gef.contains("\"edges\"")) {
-            throw new AssertionError("GEF export should contain nodes and edges");
-        }
-        System.out.println("  ✓ GEF export: " + gef.length() + " characters");
     }
 }
 
