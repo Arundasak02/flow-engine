@@ -5,13 +5,81 @@
   <modelVersion>4.0.0</modelVersion>
 
   <groupId>com.flow</groupId>
-  <artifactId>flow-engine</artifactId>
+  <artifactId>flow-core</artifactId>
   <version>1.0-SNAPSHOT</version>
+  <packaging>jar</packaging>
+
+  <name>Flow Core Engine</name>
+  <description>
+    Pure Java library for processing flow graphs.
+    No Spring, no HTTP, no frameworks - just graph processing logic.
+  </description>
 
   <properties>
-    <maven.compiler.source>23</maven.compiler.source>
-    <maven.compiler.target>23</maven.compiler.target>
+    <maven.compiler.source>17</maven.compiler.source>
+    <maven.compiler.target>17</maven.compiler.target>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <jackson.version>2.16.0</jackson.version>
   </properties>
+
+  <dependencies>
+    <!-- Jackson for JSON processing -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <version>${jackson.version}</version>
+    </dependency>
+
+    <!-- JUnit 5 for testing -->
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter-api</artifactId>
+      <version>5.9.2</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter-engine</artifactId>
+      <version>5.9.2</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <!-- Java compiler plugin -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.11.0</version>
+        <configuration>
+          <source>17</source>
+          <target>17</target>
+          <release>17</release>
+        </configuration>
+      </plugin>
+
+      <!-- JAR plugin -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <version>3.3.0</version>
+        <configuration>
+          <archive>
+            <manifest>
+              <mainClass>com.flow.core.FlowCoreEngine</mainClass>
+            </manifest>
+          </archive>
+        </configuration>
+      </plugin>
+
+      <!-- Surefire plugin for running tests -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.0.0-M9</version>
+      </plugin>
+    </plugins>
+  </build>
 
 </project>
