@@ -5,242 +5,358 @@ import com.flow.core.runtime.EventType;
 import com.flow.core.runtime.RuntimeEvent;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
- * Merges static graph with runtime execution data.
+ * Merges static graph with runtime execution data using a pipeline approach.
  *
- * Merge process:
- * 1. Add runtime nodes (zoom level 5)
- * 2. Add runtime edges (RUNTIME_CALL, PRODUCES_RUNTIME, ASYNC_HOP)
- * 3. Apply durations from METHOD_ENTER/EXIT pairs
- * 4. Apply checkpoints from CHECKPOINT events
- * 5. Stitch async hops (Kafka, PubSub, etc.)
- * 6. Attach error information
+ * Each merge stage is independent and can be tested/extended separately:
+ * 1. RuntimeNodeStage - Adds runtime-discovered nodes
+ * 2. RuntimeEdgeStage - Creates runtime call edges
+ * 3. DurationStage - Calculates method durations
+ * 4. CheckpointStage - Applies developer checkpoints
+ * 5. AsyncHopStage - Stitches async message flows
+ * 6. ErrorStage - Attaches error information
  *
  * RULES:
  * - Runtime nodes ALWAYS have zoom = 5
  * - Static nodes are NEVER overwritten
- * - Runtime paths take precedence over static paths
+ * - Each stage is idempotent
  */
 public class MergeEngine {
 
-    private static final long HOT_THRESHOLD = 100;
     private static final int RUNTIME_ZOOM_LEVEL = 5;
 
+    private final RuntimeNodeStage runtimeNodeStage;
+    private final RuntimeEdgeStage runtimeEdgeStage;
+    private final DurationStage durationStage;
+    private final CheckpointStage checkpointStage;
+    private final AsyncHopStage asyncHopStage;
+    private final ErrorStage errorStage;
+
+    public MergeEngine() {
+        this.runtimeNodeStage = new RuntimeNodeStage();
+        this.runtimeEdgeStage = new RuntimeEdgeStage();
+        this.durationStage = new DurationStage();
+        this.checkpointStage = new CheckpointStage();
+        this.asyncHopStage = new AsyncHopStage();
+        this.errorStage = new ErrorStage();
+    }
+
+    /**
+     * Main merge orchestration - runs all stages in sequence.
+     */
     public CoreGraph mergeStaticAndRuntime(CoreGraph staticGraph, List<RuntimeEvent> events) {
         Objects.requireNonNull(staticGraph, "Static graph cannot be null");
         Objects.requireNonNull(events, "Runtime events cannot be null");
 
-        addRuntimeNodes(staticGraph, events);
-        addRuntimeEdges(staticGraph, events);
-        applyDurations(staticGraph, events);
-        applyCheckpoints(staticGraph, events);
-        stitchAsyncHops(staticGraph, events);
-        attachErrors(staticGraph, events);
+        MergeContext context = new MergeContext(staticGraph, events);
 
-        return staticGraph;
-    }
+        runtimeNodeStage.execute(context);
+        runtimeEdgeStage.execute(context);
+        durationStage.execute(context);
+        checkpointStage.execute(context);
+        asyncHopStage.execute(context);
+        errorStage.execute(context);
 
-    // Add runtime nodes for METHOD_ENTER, PRODUCE_TOPIC, CONSUME_TOPIC events
-    void addRuntimeNodes(CoreGraph graph, List<RuntimeEvent> events) {
-        Set<String> processedNodes = new HashSet<>();
-
-        for (RuntimeEvent event : events) {
-            String nodeId = event.getNodeId();
-
-            if (processedNodes.contains(nodeId)) {
-                continue;
-            }
-
-            if (graph.getNode(nodeId) != null) {
-                continue;
-            }
-
-            if (shouldCreateRuntimeNode(event.getType())) {
-                CoreNode runtimeNode = createRuntimeNode(event);
-                graph.addNode(runtimeNode);
-                processedNodes.add(nodeId);
-            }
-        }
-    }
-
-    private boolean shouldCreateRuntimeNode(EventType type) {
-        return type == EventType.METHOD_ENTER ||
-               type == EventType.PRODUCE_TOPIC ||
-               type == EventType.CONSUME_TOPIC;
-    }
-
-    private CoreNode createRuntimeNode(RuntimeEvent event) {
-        String name = "Runtime: " + event.getNodeId();
-        NodeType nodeType = determineNodeType(event.getType());
-
-        CoreNode node = new CoreNode(
-            event.getNodeId(),
-            name,
-            nodeType,
-            null,
-            Visibility.PUBLIC
-        );
-
-        node.setZoomLevel(RUNTIME_ZOOM_LEVEL);
-        return node;
-    }
-
-    private NodeType determineNodeType(EventType eventType) {
-        return switch (eventType) {
-            case PRODUCE_TOPIC, CONSUME_TOPIC -> NodeType.TOPIC;
-            default -> NodeType.METHOD;
-        };
-    }
-
-    // Add runtime edges: RUNTIME_CALL, PRODUCES_RUNTIME, ASYNC_HOP
-    void addRuntimeEdges(CoreGraph graph, List<RuntimeEvent> events) {
-        Map<String, RuntimeEvent> spanToEvent = new HashMap<>();
-
-        for (RuntimeEvent event : events) {
-            if (event.getSpanId() != null) {
-                spanToEvent.put(event.getSpanId(), event);
-            }
-        }
-
-        for (RuntimeEvent event : events) {
-            if (event.getParentSpanId() != null && event.getType() == EventType.METHOD_ENTER) {
-                RuntimeEvent parent = spanToEvent.get(event.getParentSpanId());
-                if (parent != null) {
-                    createRuntimeCallEdge(graph, parent.getNodeId(), event.getNodeId());
-                }
-            }
-
-            if (event.getType() == EventType.PRODUCE_TOPIC) {
-                createProducesRuntimeEdge(graph, event);
-            }
-        }
-    }
-
-    private void createRuntimeCallEdge(CoreGraph graph, String sourceId, String targetId) {
-        if (graph.getNode(sourceId) == null || graph.getNode(targetId) == null) {
-            return;
-        }
-
-        String edgeId = "runtime:" + sourceId + "->" + targetId;
-        if (graph.getEdge(edgeId) != null) {
-            return;
-        }
-
-        CoreEdge edge = new CoreEdge(edgeId, sourceId, targetId, EdgeType.RUNTIME_CALL);
-        graph.addEdge(edge);
-    }
-
-    private void createProducesRuntimeEdge(CoreGraph graph, RuntimeEvent event) {
-        String topicId = (String) event.getDataValue("topicId");
-        if (topicId == null) {
-            return;
-        }
-
-        String edgeId = "runtime:produces:" + event.getNodeId() + "->" + topicId;
-        if (graph.getEdge(edgeId) != null) {
-            return;
-        }
-
-        if (graph.getNode(event.getNodeId()) != null && graph.getNode(topicId) != null) {
-            CoreEdge edge = new CoreEdge(edgeId, event.getNodeId(), topicId, EdgeType.PRODUCES);
-            graph.addEdge(edge);
-        }
-    }
-
-    // Apply durations: durationMs = exit.timestamp - enter.timestamp
-    void applyDurations(CoreGraph graph, List<RuntimeEvent> events) {
-        Map<String, RuntimeEvent> enterEvents = new HashMap<>();
-
-        for (RuntimeEvent event : events) {
-            if (event.getType() == EventType.METHOD_ENTER) {
-                enterEvents.put(event.getSpanId(), event);
-            } else if (event.getType() == EventType.METHOD_EXIT) {
-                RuntimeEvent enter = enterEvents.get(event.getSpanId());
-                if (enter != null) {
-                    long duration = event.getTimestamp() - enter.getTimestamp();
-                    CoreNode node = graph.getNode(event.getNodeId());
-                    if (node != null) {
-                        // Store duration in node metadata (would need to add data field to CoreNode)
-                        // For now, we'll track it separately
-                    }
-                }
-            }
-        }
-    }
-
-    // Apply checkpoints: stored under node.data.checkpoints
-    void applyCheckpoints(CoreGraph graph, List<RuntimeEvent> events) {
-        for (RuntimeEvent event : events) {
-            if (event.getType() == EventType.CHECKPOINT) {
-                CoreNode node = graph.getNode(event.getNodeId());
-                if (node != null) {
-                    // Store checkpoint data (would need data field in CoreNode)
-                    // For now, checkpoints are in RuntimeEvent.data
-                }
-            }
-        }
-    }
-
-    // Stitch async hops: PRODUCE_TOPIC + CONSUME_TOPIC -> ASYNC_HOP edge
-    void stitchAsyncHops(CoreGraph graph, List<RuntimeEvent> events) {
-        Map<String, List<RuntimeEvent>> producesByTopic = new HashMap<>();
-        Map<String, List<RuntimeEvent>> consumesByTopic = new HashMap<>();
-
-        for (RuntimeEvent event : events) {
-            String topicId = (String) event.getDataValue("topicId");
-            if (topicId == null) continue;
-
-            if (event.getType() == EventType.PRODUCE_TOPIC) {
-                producesByTopic.computeIfAbsent(topicId, k -> new ArrayList<>()).add(event);
-            } else if (event.getType() == EventType.CONSUME_TOPIC) {
-                consumesByTopic.computeIfAbsent(topicId, k -> new ArrayList<>()).add(event);
-            }
-        }
-
-        for (String topicId : producesByTopic.keySet()) {
-            List<RuntimeEvent> consumes = consumesByTopic.get(topicId);
-            if (consumes != null && !consumes.isEmpty()) {
-                for (RuntimeEvent consume : consumes) {
-                    createAsyncHopEdge(graph, topicId, consume.getNodeId());
-                }
-            }
-        }
-    }
-
-    private void createAsyncHopEdge(CoreGraph graph, String topicId, String consumerId) {
-        if (graph.getNode(topicId) == null || graph.getNode(consumerId) == null) {
-            return;
-        }
-
-        String edgeId = "async:" + topicId + "->" + consumerId;
-        if (graph.getEdge(edgeId) != null) {
-            return;
-        }
-
-        CoreEdge edge = new CoreEdge(edgeId, topicId, consumerId, EdgeType.CONSUMES);
-        graph.addEdge(edge);
-    }
-
-    // Attach error information to nodes
-    void attachErrors(CoreGraph graph, List<RuntimeEvent> events) {
-        for (RuntimeEvent event : events) {
-            if (event.getType() == EventType.ERROR) {
-                CoreNode node = graph.getNode(event.getNodeId());
-                if (node != null) {
-                    // Store error data (would need data field in CoreNode)
-                    // node.data.error = { type, message, stack }
-                    // node.data.status = "FAILED"
-                }
-            }
-        }
+        return context.getGraph();
     }
 
     // Legacy method for backward compatibility
     public void merge(CoreGraph graph) {
-        // No-op for now, or call mergeStaticAndRuntime with empty events
         Objects.requireNonNull(graph, "Graph cannot be null");
+    }
+
+    // ============================================================
+    // MERGE CONTEXT - Shared state across all stages
+    // ============================================================
+
+    private static class MergeContext {
+        private final CoreGraph graph;
+        private final List<RuntimeEvent> events;
+        private final Map<String, RuntimeEvent> spanToEvent;
+
+        MergeContext(CoreGraph graph, List<RuntimeEvent> events) {
+            this.graph = graph;
+            this.events = events;
+            this.spanToEvent = buildSpanIndex(events);
+        }
+
+        private Map<String, RuntimeEvent> buildSpanIndex(List<RuntimeEvent> events) {
+            Map<String, RuntimeEvent> index = new HashMap<>();
+            for (RuntimeEvent event : events) {
+                if (event.getSpanId() != null) {
+                    index.put(event.getSpanId(), event);
+                }
+            }
+            return index;
+        }
+
+        CoreGraph getGraph() {
+            return graph;
+        }
+
+        List<RuntimeEvent> getEvents() {
+            return events;
+        }
+
+        RuntimeEvent getEventBySpan(String spanId) {
+            return spanToEvent.get(spanId);
+        }
+    }
+
+    // ============================================================
+    // STAGE 1: Runtime Node Creation
+    // ============================================================
+
+    private static class RuntimeNodeStage {
+        void execute(MergeContext context) {
+            Set<String> processedNodes = new HashSet<>();
+
+            for (RuntimeEvent event : context.getEvents()) {
+                if (shouldProcessEvent(event, context.getGraph(), processedNodes)) {
+                    addRuntimeNode(event, context.getGraph());
+                    processedNodes.add(event.getNodeId());
+                }
+            }
+        }
+
+        private boolean shouldProcessEvent(RuntimeEvent event, CoreGraph graph, Set<String> processed) {
+            return !processed.contains(event.getNodeId()) &&
+                   graph.getNode(event.getNodeId()) == null &&
+                   isNodeCreationEvent(event.getType());
+        }
+
+        private boolean isNodeCreationEvent(EventType type) {
+            return type == EventType.METHOD_ENTER ||
+                   type == EventType.PRODUCE_TOPIC ||
+                   type == EventType.CONSUME_TOPIC;
+        }
+
+        private void addRuntimeNode(RuntimeEvent event, CoreGraph graph) {
+            NodeType nodeType = determineNodeType(event.getType());
+            String name = "Runtime: " + event.getNodeId();
+
+            CoreNode node = new CoreNode(
+                event.getNodeId(),
+                name,
+                nodeType,
+                null,
+                Visibility.PUBLIC
+            );
+            node.setZoomLevel(RUNTIME_ZOOM_LEVEL);
+            graph.addNode(node);
+        }
+
+        private NodeType determineNodeType(EventType eventType) {
+            return switch (eventType) {
+                case PRODUCE_TOPIC, CONSUME_TOPIC -> NodeType.TOPIC;
+                default -> NodeType.METHOD;
+            };
+        }
+    }
+
+    // ============================================================
+    // STAGE 2: Runtime Edge Creation
+    // ============================================================
+
+    private static class RuntimeEdgeStage {
+        void execute(MergeContext context) {
+            for (RuntimeEvent event : context.getEvents()) {
+                processEvent(event, context);
+            }
+        }
+
+        private void processEvent(RuntimeEvent event, MergeContext context) {
+            if (event.getType() == EventType.METHOD_ENTER && event.getParentSpanId() != null) {
+                createMethodCallEdge(event, context);
+            } else if (event.getType() == EventType.PRODUCE_TOPIC) {
+                createProducesEdge(event, context.getGraph());
+            }
+        }
+
+        private void createMethodCallEdge(RuntimeEvent event, MergeContext context) {
+            RuntimeEvent parent = context.getEventBySpan(event.getParentSpanId());
+            if (parent != null) {
+                addEdgeIfValid(
+                    context.getGraph(),
+                    "runtime:" + parent.getNodeId() + "->" + event.getNodeId(),
+                    parent.getNodeId(),
+                    event.getNodeId(),
+                    EdgeType.RUNTIME_CALL
+                );
+            }
+        }
+
+        private void createProducesEdge(RuntimeEvent event, CoreGraph graph) {
+            String topicId = (String) event.getDataValue("topicId");
+            if (topicId != null) {
+                addEdgeIfValid(
+                    graph,
+                    "runtime:produces:" + event.getNodeId() + "->" + topicId,
+                    event.getNodeId(),
+                    topicId,
+                    EdgeType.PRODUCES
+                );
+            }
+        }
+
+        private void addEdgeIfValid(CoreGraph graph, String edgeId, String sourceId,
+                                    String targetId, EdgeType type) {
+            if (graph.getNode(sourceId) != null &&
+                graph.getNode(targetId) != null &&
+                graph.getEdge(edgeId) == null) {
+                graph.addEdge(new CoreEdge(edgeId, sourceId, targetId, type));
+            }
+        }
+    }
+
+    // ============================================================
+    // STAGE 3: Duration Calculation
+    // ============================================================
+
+    private static class DurationStage {
+        void execute(MergeContext context) {
+            Map<String, RuntimeEvent> enterEvents = collectEnterEvents(context.getEvents());
+
+            for (RuntimeEvent event : context.getEvents()) {
+                if (event.getType() == EventType.METHOD_EXIT) {
+                    processDuration(event, enterEvents, context.getGraph());
+                }
+            }
+        }
+
+        private Map<String, RuntimeEvent> collectEnterEvents(List<RuntimeEvent> events) {
+            Map<String, RuntimeEvent> enterEvents = new HashMap<>();
+            for (RuntimeEvent event : events) {
+                if (event.getType() == EventType.METHOD_ENTER && event.getSpanId() != null) {
+                    enterEvents.put(event.getSpanId(), event);
+                }
+            }
+            return enterEvents;
+        }
+
+        private void processDuration(RuntimeEvent exitEvent, Map<String, RuntimeEvent> enterEvents,
+                                     CoreGraph graph) {
+            RuntimeEvent enterEvent = enterEvents.get(exitEvent.getSpanId());
+            if (enterEvent != null) {
+                long duration = exitEvent.getTimestamp() - enterEvent.getTimestamp();
+                // TODO: Store duration in node metadata when CoreNode supports it
+                // CoreNode node = graph.getNode(exitEvent.getNodeId());
+                // if (node != null) node.setData("durationMs", duration);
+            }
+        }
+    }
+
+    // ============================================================
+    // STAGE 4: Checkpoint Application
+    // ============================================================
+
+    private static class CheckpointStage {
+        void execute(MergeContext context) {
+            for (RuntimeEvent event : context.getEvents()) {
+                if (event.getType() == EventType.CHECKPOINT) {
+                    applyCheckpoint(event, context.getGraph());
+                }
+            }
+        }
+
+        private void applyCheckpoint(RuntimeEvent event, CoreGraph graph) {
+            CoreNode node = graph.getNode(event.getNodeId());
+            if (node != null) {
+                // TODO: Store checkpoint data when CoreNode supports metadata
+                // node.setData("checkpoints", event.getData());
+            }
+        }
+    }
+
+    // ============================================================
+    // STAGE 5: Async Hop Stitching
+    // ============================================================
+
+    private static class AsyncHopStage {
+        void execute(MergeContext context) {
+            AsyncHopIndex index = buildAsyncHopIndex(context.getEvents());
+            stitchAsyncHops(index, context.getGraph());
+        }
+
+        private AsyncHopIndex buildAsyncHopIndex(List<RuntimeEvent> events) {
+            AsyncHopIndex index = new AsyncHopIndex();
+            for (RuntimeEvent event : events) {
+                String topicId = (String) event.getDataValue("topicId");
+                if (topicId != null) {
+                    if (event.getType() == EventType.PRODUCE_TOPIC) {
+                        index.addProduce(topicId, event);
+                    } else if (event.getType() == EventType.CONSUME_TOPIC) {
+                        index.addConsume(topicId, event);
+                    }
+                }
+            }
+            return index;
+        }
+
+        private void stitchAsyncHops(AsyncHopIndex index, CoreGraph graph) {
+            for (String topicId : index.getTopics()) {
+                List<RuntimeEvent> consumes = index.getConsumes(topicId);
+                if (consumes != null) {
+                    for (RuntimeEvent consume : consumes) {
+                        createAsyncHopEdge(graph, topicId, consume.getNodeId());
+                    }
+                }
+            }
+        }
+
+        private void createAsyncHopEdge(CoreGraph graph, String topicId, String consumerId) {
+            String edgeId = "async:" + topicId + "->" + consumerId;
+            if (graph.getNode(topicId) != null &&
+                graph.getNode(consumerId) != null &&
+                graph.getEdge(edgeId) == null) {
+                graph.addEdge(new CoreEdge(edgeId, topicId, consumerId, EdgeType.CONSUMES));
+            }
+        }
+    }
+
+    private static class AsyncHopIndex {
+        private final Map<String, List<RuntimeEvent>> producesByTopic = new HashMap<>();
+        private final Map<String, List<RuntimeEvent>> consumesByTopic = new HashMap<>();
+
+        void addProduce(String topicId, RuntimeEvent event) {
+            producesByTopic.computeIfAbsent(topicId, k -> new ArrayList<>()).add(event);
+        }
+
+        void addConsume(String topicId, RuntimeEvent event) {
+            consumesByTopic.computeIfAbsent(topicId, k -> new ArrayList<>()).add(event);
+        }
+
+        Set<String> getTopics() {
+            return producesByTopic.keySet();
+        }
+
+        List<RuntimeEvent> getConsumes(String topicId) {
+            return consumesByTopic.get(topicId);
+        }
+    }
+
+    // ============================================================
+    // STAGE 6: Error Attachment
+    // ============================================================
+
+    private static class ErrorStage {
+        void execute(MergeContext context) {
+            for (RuntimeEvent event : context.getEvents()) {
+                if (event.getType() == EventType.ERROR) {
+                    attachError(event, context.getGraph());
+                }
+            }
+        }
+
+        private void attachError(RuntimeEvent event, CoreGraph graph) {
+            CoreNode node = graph.getNode(event.getNodeId());
+            if (node != null) {
+                // TODO: Store error data when CoreNode supports metadata
+                // node.setData("error", event.getData());
+                // node.setData("status", "FAILED");
+            }
+        }
     }
 }
 

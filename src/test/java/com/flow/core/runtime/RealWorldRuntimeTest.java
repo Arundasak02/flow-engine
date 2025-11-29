@@ -32,83 +32,31 @@ public class RealWorldRuntimeTest {
         System.out.println("════════════════════════════════════════════════\n");
 
         try {
-            // 1. Load static graph from flow.json
-            System.out.println("1. Loading static graph from flow.json...");
-            CoreGraph staticGraph = loadStaticGraph();
-            System.out.println("   ✓ Loaded " + staticGraph.getNodeCount() + " nodes, " +
-                             staticGraph.getEdgeCount() + " edges\n");
+            // 1. Load static graph
+            CoreGraph staticGraph = loadAndValidateStaticGraph();
 
             // 2. Initialize Runtime Engine
-            System.out.println("2. Initializing Runtime Engine...");
-            RuntimeEngine runtimeEngine = new RuntimeEngine();
-            System.out.println("   ✓ Runtime Engine ready\n");
+            RuntimeEngine runtimeEngine = initializeRuntimeEngine();
 
-            // 3. Simulate successful order flow
-            System.out.println("3. Simulating SUCCESSFUL order flow...");
-            String traceId1 = "trace-order-001";
-            List<RuntimeEvent> successEvents = createSuccessfulOrderEvents(traceId1);
-            runtimeEngine.acceptEvents(successEvents);
-            System.out.println("   ✓ Ingested " + successEvents.size() + " events\n");
+            // 3-4. Test successful order flow
+            List<RuntimeEvent> successEvents = testSuccessfulOrderFlow(runtimeEngine, staticGraph);
 
-            // 4. Process successful trace
-            System.out.println("4. Processing successful trace...");
-            RuntimeFlow successFlow = runtimeEngine.processTrace(traceId1, staticGraph);
-            printFlowSummary(successFlow);
-            printDetailedSteps(successFlow);
+            // 5-6. Test failed order flow
+            testFailedOrderFlow(runtimeEngine, staticGraph);
 
-            // 5. Simulate failed order flow (payment declined)
-            System.out.println("\n5. Simulating FAILED order flow (payment declined)...");
-            String traceId2 = "trace-order-002";
-            List<RuntimeEvent> failedEvents = createFailedOrderEvents(traceId2);
-            runtimeEngine.acceptEvents(failedEvents);
-            System.out.println("   ✓ Ingested " + failedEvents.size() + " events\n");
+            // 7-8. Test async consumer flow
+            testAsyncConsumerFlow(runtimeEngine, staticGraph);
 
-            // 6. Process failed trace
-            System.out.println("6. Processing failed trace...");
-            RuntimeFlow failedFlow = runtimeEngine.processTrace(traceId2, staticGraph);
-            printFlowSummary(failedFlow);
-            printDetailedSteps(failedFlow);
+            // 9. Show active traces
+            displayActiveTraces(runtimeEngine);
 
-            // 7. Simulate async consumer processing
-            System.out.println("\n7. Simulating async Kafka consumer...");
-            String traceId3 = "trace-order-003";
-            List<RuntimeEvent> asyncEvents = createAsyncConsumerEvents(traceId3);
-            runtimeEngine.acceptEvents(asyncEvents);
-            System.out.println("   ✓ Ingested " + asyncEvents.size() + " events\n");
-
-            // 8. Process async trace
-            System.out.println("8. Processing async trace...");
-            RuntimeFlow asyncFlow = runtimeEngine.processTrace(traceId3, staticGraph);
-            printFlowSummary(asyncFlow);
-            printDetailedSteps(asyncFlow);
-
-            // 9. Show all active traces
-            System.out.println("\n9. Active traces in memory:");
-            Set<String> allTraces = runtimeEngine.getAllTraceIds();
-            allTraces.forEach(tid -> System.out.println("   - " + tid));
-
-            // 10. Export enriched graph to Neo4j
-            System.out.println("\n10. Exporting enriched graph to Neo4j format...");
-            CoreGraph enrichedGraph = createEnrichedGraph(staticGraph, successEvents, runtimeEngine);
-            String neo4jExport = exportToNeo4j(enrichedGraph);
-            System.out.println("   ✓ Generated " + countLines(neo4jExport) + " Cypher statements");
-            System.out.println("\n   Sample Neo4j output:");
-            printSampleLines(neo4jExport, 5);
-
-            // 11. Save Neo4j export to file
-            System.out.println("\n11. Saving Neo4j export to file...");
-            Files.writeString(Paths.get("target/runtime-graph.cypher"), neo4jExport);
-            System.out.println("   ✓ Saved to target/runtime-graph.cypher");
+            // 10-11. Export and save enriched graph
+            exportEnrichedGraph(staticGraph, successEvents, runtimeEngine);
 
             // 12. Cleanup
-            System.out.println("\n12. Cleaning up...");
-            runtimeEngine.expireOldTraces();
-            System.out.println("   ✓ Old traces expired\n");
+            cleanupTraces(runtimeEngine);
 
-            System.out.println("════════════════════════════════════════════════");
-            System.out.println("  ✓✓✓ ALL TESTS PASSED ✓✓✓");
-            System.out.println("  Runtime graph exported to Neo4j!");
-            System.out.println("════════════════════════════════════════════════");
+            printSuccessMessage();
 
         } catch (Exception e) {
             System.err.println("\n✗ Test failed:");
@@ -122,6 +70,103 @@ public class RealWorldRuntimeTest {
         FlowCoreEngine engine = new FlowCoreEngine();
         return engine.process(flowJson);
     }
+
+    // ============================================================
+    // TEST PHASE METHODS
+    // ============================================================
+
+    private static CoreGraph loadAndValidateStaticGraph() throws Exception {
+        System.out.println("1. Loading static graph from flow.json...");
+        CoreGraph staticGraph = loadStaticGraph();
+        System.out.println("   ✓ Loaded " + staticGraph.getNodeCount() + " nodes, " +
+                         staticGraph.getEdgeCount() + " edges\n");
+        return staticGraph;
+    }
+
+    private static RuntimeEngine initializeRuntimeEngine() {
+        System.out.println("2. Initializing Runtime Engine...");
+        RuntimeEngine runtimeEngine = new RuntimeEngine();
+        System.out.println("   ✓ Runtime Engine ready\n");
+        return runtimeEngine;
+    }
+
+    private static List<RuntimeEvent> testSuccessfulOrderFlow(RuntimeEngine runtimeEngine, CoreGraph staticGraph) {
+        System.out.println("3. Simulating SUCCESSFUL order flow...");
+        String traceId = "trace-order-001";
+        List<RuntimeEvent> events = createSuccessfulOrderEvents(traceId);
+        runtimeEngine.acceptEvents(events);
+        System.out.println("   ✓ Ingested " + events.size() + " events\n");
+
+        System.out.println("4. Processing successful trace...");
+        RuntimeFlow flow = runtimeEngine.processTrace(traceId, staticGraph);
+        printFlowSummary(flow);
+        printDetailedSteps(flow);
+
+        return events;
+    }
+
+    private static void testFailedOrderFlow(RuntimeEngine runtimeEngine, CoreGraph staticGraph) {
+        System.out.println("\n5. Simulating FAILED order flow (payment declined)...");
+        String traceId = "trace-order-002";
+        List<RuntimeEvent> events = createFailedOrderEvents(traceId);
+        runtimeEngine.acceptEvents(events);
+        System.out.println("   ✓ Ingested " + events.size() + " events\n");
+
+        System.out.println("6. Processing failed trace...");
+        RuntimeFlow flow = runtimeEngine.processTrace(traceId, staticGraph);
+        printFlowSummary(flow);
+        printDetailedSteps(flow);
+    }
+
+    private static void testAsyncConsumerFlow(RuntimeEngine runtimeEngine, CoreGraph staticGraph) {
+        System.out.println("\n7. Simulating async Kafka consumer...");
+        String traceId = "trace-order-003";
+        List<RuntimeEvent> events = createAsyncConsumerEvents(traceId);
+        runtimeEngine.acceptEvents(events);
+        System.out.println("   ✓ Ingested " + events.size() + " events\n");
+
+        System.out.println("8. Processing async trace...");
+        RuntimeFlow flow = runtimeEngine.processTrace(traceId, staticGraph);
+        printFlowSummary(flow);
+        printDetailedSteps(flow);
+    }
+
+    private static void displayActiveTraces(RuntimeEngine runtimeEngine) {
+        System.out.println("\n9. Active traces in memory:");
+        Set<String> allTraces = runtimeEngine.getAllTraceIds();
+        allTraces.forEach(tid -> System.out.println("   - " + tid));
+    }
+
+    private static void exportEnrichedGraph(CoreGraph staticGraph, List<RuntimeEvent> events,
+                                           RuntimeEngine runtimeEngine) throws Exception {
+        System.out.println("\n10. Exporting enriched graph to Neo4j format...");
+        CoreGraph enrichedGraph = createEnrichedGraph(staticGraph, events, runtimeEngine);
+        String neo4jExport = exportToNeo4j(enrichedGraph);
+        System.out.println("   ✓ Generated " + countLines(neo4jExport) + " Cypher statements");
+        System.out.println("\n   Sample Neo4j output:");
+        printSampleLines(neo4jExport, 5);
+
+        System.out.println("\n11. Saving Neo4j export to file...");
+        Files.writeString(Paths.get("target/runtime-graph.cypher"), neo4jExport);
+        System.out.println("   ✓ Saved to target/runtime-graph.cypher");
+    }
+
+    private static void cleanupTraces(RuntimeEngine runtimeEngine) {
+        System.out.println("\n12. Cleaning up...");
+        runtimeEngine.expireOldTraces();
+        System.out.println("   ✓ Old traces expired\n");
+    }
+
+    private static void printSuccessMessage() {
+        System.out.println("════════════════════════════════════════════════");
+        System.out.println("  ✓✓✓ ALL TESTS PASSED ✓✓✓");
+        System.out.println("  Runtime graph exported to Neo4j!");
+        System.out.println("════════════════════════════════════════════════");
+    }
+
+    // ============================================================
+    // EVENT CREATION METHODS
+    // ============================================================
 
     /**
      * Successful order flow:
@@ -452,6 +497,10 @@ public class RealWorldRuntimeTest {
         return events;
     }
 
+    // ============================================================
+    // DISPLAY METHODS
+    // ============================================================
+
     private static void printFlowSummary(RuntimeFlow flow) {
         System.out.println("   ┌─────────────────────────────────────────┐");
         System.out.println("   │ Flow Summary                            │");
@@ -510,6 +559,10 @@ public class RealWorldRuntimeTest {
         return nodeId;
     }
 
+    // ============================================================
+    // GRAPH OPERATIONS
+    // ============================================================
+
     /**
      * Create enriched graph by merging static graph with runtime events
      */
@@ -565,6 +618,9 @@ public class RealWorldRuntimeTest {
         return exporter.export(graph);
     }
 
+    // ============================================================
+    // UTILITY METHODS
+    // ============================================================
 
     /**
      * Count lines in a string
