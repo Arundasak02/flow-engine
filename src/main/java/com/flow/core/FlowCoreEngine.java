@@ -67,7 +67,10 @@ public class FlowCoreEngine {
 
     private void mergeRuntimeData(CoreGraph graph, List<Map<String, Object>> runtimeEvents) {
         runtimeEventIngestor.ingest(runtimeEvents, graph);
-        mergeEngine.merge(graph);
+        List<com.flow.core.runtime.RuntimeEvent> events = runtimeEventIngestor.getAllTraceIds().stream()
+                .flatMap(traceId -> runtimeEventIngestor.getEventsByTrace(traceId).stream())
+                .toList();
+        mergeEngine.mergeStaticAndRuntime(graph, events);
     }
 
     public CoreGraph process(String staticGraphJson) {
