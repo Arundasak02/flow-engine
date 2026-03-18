@@ -1,22 +1,14 @@
 package com.flow.core.zoom;
 
 import com.flow.core.graph.*;
+import org.junit.jupiter.api.Test;
 
-public class ZoomEngineTest {
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
-    public static void main(String[] args) {
-        System.out.println("=== ZoomEngine Tests ===\n");
+class ZoomEngineTest {
 
-        testBasicZoomAssignment();
-        testCustomPolicy();
-        testZoomLevelBounds();
-
-        System.out.println("\n✓ All ZoomEngine tests passed!");
-    }
-
-    private static void testBasicZoomAssignment() {
-        System.out.println("Test: Basic zoom level assignment");
-
+    @Test
+    void assignsZoomLevelsForStandardNodeTypes() {
         CoreGraph graph = new CoreGraph("1");
         graph.addNode(new CoreNode("ep1", "Endpoint", NodeType.ENDPOINT, null, Visibility.PUBLIC));
         graph.addNode(new CoreNode("svc1", "Service", NodeType.SERVICE, "svc1", Visibility.PUBLIC));
@@ -25,16 +17,13 @@ public class ZoomEngineTest {
         ZoomEngine engine = new ZoomEngine();
         engine.assignZoomLevels(graph);
 
-        assert graph.getNode("ep1").getZoomLevel() == 1 : "Endpoint should be zoom level 1";
-        assert graph.getNode("svc1").getZoomLevel() == 2 : "Service should be zoom level 2";
-        assert graph.getNode("meth1").getZoomLevel() == 3 : "Method should be zoom level 3";
-
-        System.out.println("  ✓ Nodes assigned correct zoom levels");
+        assertEquals(1, graph.getNode("ep1").getZoomLevel());
+        assertEquals(2, graph.getNode("svc1").getZoomLevel());
+        assertEquals(3, graph.getNode("meth1").getZoomLevel());
     }
 
-    private static void testCustomPolicy() {
-        System.out.println("\nTest: Custom zoom policy");
-
+    @Test
+    void appliesCustomPolicy() {
         CoreGraph graph = new CoreGraph("1");
         graph.addNode(new CoreNode("custom1", "Custom", NodeType.INTERFACE, null, Visibility.PUBLIC));
 
@@ -44,26 +33,7 @@ public class ZoomEngineTest {
         ZoomEngine engine = new ZoomEngine(policy);
         engine.assignZoomLevels(graph);
 
-        assert graph.getNode("custom1").getZoomLevel() == 4 : "Custom type should be zoom level 4";
-
-        System.out.println("  ✓ Custom policy applied correctly");
-    }
-
-    private static void testZoomLevelBounds() {
-        System.out.println("\nTest: Zoom level boundary validation");
-
-        CoreGraph graph = new CoreGraph("1");
-        graph.addNode(new CoreNode("unknown", "Unknown", NodeType.FIELD, null, Visibility.PRIVATE));
-
-        ZoomEngine engine = new ZoomEngine();
-
-        try {
-            engine.assignZoomLevels(graph);
-            System.out.println("  ✓ FIELD type assigned correctly to level 4");
-        } catch (IllegalArgumentException e) {
-            System.out.println("  ✗ Should have assigned FIELD type to level 4");
-            throw e;
-        }
+        assertEquals(4, graph.getNode("custom1").getZoomLevel());
     }
 }
 

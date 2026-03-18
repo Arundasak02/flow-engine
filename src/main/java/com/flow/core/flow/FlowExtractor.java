@@ -111,6 +111,9 @@ public class FlowExtractor {
             return;
         }
 
+        // Mark as visited before adding the step to avoid duplicates when multiple parents
+        // discover the same target before it is polled from the queue.
+        visited.add(targetId);
         addFlowStep(flowModel, targetNode, current);
         enqueueNextNode(queue, targetId, current);
     }
